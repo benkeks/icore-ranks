@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to collect ICORE ranking information from CORE portal
+Script to collect CORE ranking information from CORE portal
 for Field Of Research: 4613 - Theory of computation
 """
 
@@ -39,7 +39,8 @@ class COREPortalScraper:
             
             for elem in year_elements:
                 year = elem.get_text(strip=True)
-                if year.isdigit() and 2000 <= int(year) <= datetime.now().year:
+                # Use current year - 1 as upper bound since current year rankings may not be published yet
+                if year.isdigit() and 2000 <= int(year) <= datetime.now().year - 1:
                     years.append(year)
             
             return sorted(list(set(years)))

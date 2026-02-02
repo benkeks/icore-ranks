@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Script to visualize ICORE ranking changes over the years
+Script to visualize CORE ranking changes over the years
 """
 
 import json

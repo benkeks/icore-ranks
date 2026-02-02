@@ -1,6 +1,6 @@
-# ICORE Rankings Collection and Visualization
+# CORE Rankings Collection and Visualization
 
-This repository contains Python scripts to collect and visualize ICORE (CORE Conference Ranking) information from the CORE portal (https://portal.core.edu.au/) for Field Of Research: 4613 - Theory of computation.
+This repository contains Python scripts to collect and visualize CORE (CORE Conference Ranking) information from the CORE portal (https://portal.core.edu.au/) for Field Of Research: 4613 - Theory of computation.
 
 ## Features
 
