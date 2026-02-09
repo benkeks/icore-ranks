@@ -325,6 +325,133 @@ class RankingVisualizer:
         
         plt.close()
     
+    def plot_rank_migrations(self, output_file="rank_migrations.png"):
+        """Plot conference migrations between ranks across editions as a Sankey-like diagram"""
+        df = self.prepare_dataframe()
+        
+        if df.empty:
+            print("No data to plot!")
+            return
+        
+        # Get unique sources in chronological order
+        unique_sources = sorted(df['source'].unique())
+        if len(unique_sources) < 2:
+            print("Need at least 2 editions for migration visualization")
+            return
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=(6 + 4 * len(unique_sources), 12))
+        
+        display_rank_order = [r for r in self.RANK_ORDER if r != 'Australasian']
+        rank_colors = {r: self.RANK_COLORS[r] for r in display_rank_order}
+        
+        # Prepare data for all sources
+        y_positions = {}
+        source_rank_counts = {}
+        
+        for source_idx, source in enumerate(unique_sources):
+            df_source = df[df['source'] == source]
+            rank_counts = df_source['rank_group'].value_counts()
+            source_rank_counts[source] = rank_counts
+            
+            # Get relevant ranks for this source
+            relevant_ranks = [r for r in display_rank_order if r in rank_counts.index]
+            relevant_ranks = sorted(relevant_ranks, key=lambda r: display_rank_order.index(r))
+            
+            # Assign y-positions
+            current_y = 0
+            y_positions[source] = {}
+            for rank in relevant_ranks:
+                count = rank_counts.get(rank, 0)
+                y_positions[source][rank] = (current_y, current_y + count)
+                current_y += count + 0.5
+        
+        # Draw boxes and flows
+        for source_idx, source in enumerate(unique_sources):
+            x_pos = source_idx * 4
+            
+            # Draw rank boxes for this source
+            for rank in display_rank_order:
+                if rank in y_positions[source]:
+                    y_min, y_max = y_positions[source][rank]
+                    height = y_max - y_min
+                    if height > 0:
+                        color = rank_colors.get(rank, '#7f7f7f')
+                        rect = mpatches.Rectangle((x_pos - 0.4, y_min), 0.8, height, 
+                                                  facecolor=color, alpha=0.6, edgecolor='black', linewidth=1.5)
+                        ax.add_patch(rect)
+                        count = source_rank_counts[source].get(rank, 0)
+                        ax.text(x_pos, (y_min + y_max) / 2, f"{rank}\n({count})", 
+                               ha='center', va='center', fontsize=10, fontweight='bold')
+            
+            # Draw flows to next source
+            if source_idx < len(unique_sources) - 1:
+                next_source = unique_sources[source_idx + 1]
+                
+                # Count transitions between each pair of ranks
+                transitions = defaultdict(int)
+                for conf in df[df['acronym'].isin(df[df['source'] == source]['acronym']) & 
+                               df['source'].isin([source, next_source])]['acronym'].unique():
+                    conf_data_from = df[(df['acronym'] == conf) & (df['source'] == source)]
+                    conf_data_to = df[(df['acronym'] == conf) & (df['source'] == next_source)]
+                    
+                    if len(conf_data_from) > 0 and len(conf_data_to) > 0:
+                        from_rank = conf_data_from.iloc[0]['rank_group']
+                        to_rank = conf_data_to.iloc[0]['rank_group']
+                        transitions[(from_rank, to_rank)] += 1
+                
+                # Draw flow lines with thickness based on count
+                x_from = x_pos + 0.4
+                x_to = x_pos + 4 - 0.4
+                
+                max_transition_count = max(transitions.values()) if transitions else 1
+                
+                for (from_rank, to_rank), count in transitions.items():
+                    if from_rank in y_positions[source] and to_rank in y_positions[next_source]:
+                        y_from_min, y_from_max = y_positions[source][from_rank]
+                        y_to_min, y_to_max = y_positions[next_source][to_rank]
+                        
+                        from_y = (y_from_min + y_from_max) / 2
+                        to_y = (y_to_min + y_to_max) / 2
+                        
+                        # Line width proportional to count
+                        line_width = 1 + (count / max_transition_count) * 3
+                        
+                        ax.plot([x_from, x_to], [from_y, to_y], color='gray', 
+                               alpha=0.4, linewidth=line_width, zorder=1)
+                        
+                        # Add count label on flow line
+                        mid_x = (x_from + x_to) / 2
+                        mid_y = (from_y + to_y) / 2
+                        ax.text(mid_x, mid_y, str(count), fontsize=8, 
+                               ha='center', va='bottom', 
+                               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+        
+        # Set axis properties
+        ax.set_xlim(-1, len(unique_sources) * 4)
+        all_y_max = max([max([y_positions[s][r][1] for r in y_positions[s]]) 
+                         if y_positions[s] else 0 for s in unique_sources])
+        ax.set_ylim(-2, all_y_max + 2)
+        ax.set_aspect('auto')
+        ax.axis('off')
+        
+        # Add source labels at the top
+        for source_idx, source in enumerate(unique_sources):
+            x_pos = source_idx * 4
+            ax.text(x_pos, all_y_max + 1.5, source, fontsize=13, fontweight='bold', ha='center')
+        
+        ax.set_title('Conference Migrations Between Ranks Across Editions\nField of Research: 4613 - Theory of Computation',
+                     fontsize=16, fontweight='bold', pad=20)
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        output_path = os.path.join(os.path.dirname(__file__), output_file)
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"Saved plot to {output_path}")
+        
+        plt.close()
+    
     def generate_summary_stats(self):
         """Print summary statistics about the rankings"""
         df = self.prepare_dataframe()
@@ -372,6 +499,7 @@ def main():
     visualizer.plot_rank_distribution_over_time("rank_distribution.png")
     visualizer.plot_individual_conference_changes("conference_rank_changes.png")
     visualizer.plot_rank_transitions("rank_transitions.png")
+    visualizer.plot_rank_migrations("rank_migrations.png")
     
     print("\nAll visualizations generated successfully!")
 
