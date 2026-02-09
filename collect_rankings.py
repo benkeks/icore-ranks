@@ -9,7 +9,9 @@ from bs4 import BeautifulSoup
 import json
 import os
 import time
+import csv
 from datetime import datetime
+from io import StringIO
 
 
 class COREPortalScraper:
@@ -25,84 +27,120 @@ class COREPortalScraper:
         })
         
     def get_available_years(self):
-        """Get list of available ranking years"""
+        """Get list of available ranking sources (ICORE2026, CORE2023, etc.)"""
         try:
             response = self.session.get(self.SEARCH_URL)
             response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # Find year selector or links
-            # This needs to be adapted based on actual site structure
-            years = []
-            # Look for year options in dropdowns or links
-            year_elements = soup.find_all(['option', 'a'], text=lambda t: t and t.strip().isdigit() and len(t.strip()) == 4)
+            # Find the source dropdown
+            source_select = soup.find('select', {'name': 'source'})
+            sources = []
             
-            for elem in year_elements:
-                year = elem.get_text(strip=True)
-                # Use current year - 1 as upper bound since current year rankings may not be published yet
-                if year.isdigit() and 2000 <= int(year) <= datetime.now().year - 1:
-                    years.append(year)
+            if source_select:
+                options = source_select.find_all('option')
+                for option in options:
+                    value = option.get('value', '').strip()
+                    # Skip 'all' option and extract actual source values
+                    if value and value != 'all':
+                        sources.append(value)
             
-            return sorted(list(set(years)))
+            return sources
         except Exception as e:
-            print(f"Error fetching available years: {e}")
-            # Return a default range if we can't fetch
-            return [str(y) for y in range(2008, datetime.now().year + 1)]
+            print(f"Error fetching available sources: {e}")
+            # Return a default list if we can't fetch
+            return ['ICORE2026', 'CORE2023', 'CORE2021', 'CORE2020', 'CORE2018', 'CORE2017', 'CORE2014', 'CORE2013', 'ERA2010', 'CORE2008']
     
-    def search_for_code(self, for_code="4613", year=None):
+    def search_for_code(self, for_code="4613", source=None):
         """
-        Search for conferences with the given Field of Research code
+        Search for conferences with the given Field of Research code via CSV export
         
         Args:
             for_code: Field of Research code (default: 4613 - Theory of computation)
-            year: Specific year to query (optional)
+            source: Specific source to query (e.g., 'ICORE2026', 'CORE2023')
         
         Returns:
             List of conference entries with their rankings
         """
         params = {
+            'search': for_code,
             'by': 'for',
-            'for': for_code,
+            'sort': 'atitle',
+            'page': '1',
+            'do': 'Export'
         }
         
-        if year:
-            params['year'] = year
+        if source:
+            params['source'] = source
             
         try:
             response = self.session.get(self.SEARCH_URL, params=params)
             response.raise_for_status()
-            return self.parse_results(response.content, year)
+            print(f"\n[DEBUG] Retrieved CSV for source {source}")
+            print(f"[DEBUG] Response status: {response.status_code}")
+            print(f"[DEBUG] Response length: {len(response.text)} characters")
+            print(f"[DEBUG] First 500 chars of CSV:\n{response.text[:500]}")
+            return self.parse_csv_results(response.text, source)
         except Exception as e:
-            print(f"Error searching for code {for_code} (year: {year}): {e}")
+            print(f"Error searching for code {for_code} (source: {source}): {e}")
             return []
     
-    def parse_results(self, html_content, year):
-        """Parse HTML results to extract conference rankings"""
-        soup = BeautifulSoup(html_content, 'html.parser')
+    def parse_csv_results(self, csv_content, source):
+        """Parse CSV results to extract conference rankings
+        
+        CSV columns (no header):
+        0: ID
+        1: Title
+        2: Acronym
+        3: Source
+        4: Rank
+        5: Yes/No flag
+        6+: FoR codes
+        """
         results = []
         
-        # Find the results table
-        # The exact structure depends on the website, adapting to common patterns
-        table = soup.find('table', class_=['table', 'results', 'rankings'])
-        
-        if table:
-            rows = table.find_all('tr')[1:]  # Skip header row
-            for row in rows:
-                cells = row.find_all('td')
-                if len(cells) >= 3:
-                    entry = {
-                        'title': cells[0].get_text(strip=True),
-                        'acronym': cells[1].get_text(strip=True) if len(cells) > 1 else '',
-                        'rank': cells[2].get_text(strip=True) if len(cells) > 2 else '',
-                        'year': year
-                    }
+        try:
+            # Parse CSV content using regular reader (no headers)
+            csv_file = StringIO(csv_content)
+            reader = csv.reader(csv_file)
+            
+            row_count = 0
+            for row in reader:
+                row_count += 1
+                
+                # Skip empty rows
+                if not row or len(row) < 5:
+                    continue
+                
+                # Extract fields by column index
+                entry = {
+                    'id': row[0].strip() if len(row) > 0 else '',
+                    'title': row[1].strip() if len(row) > 1 else '',
+                    'acronym': row[2].strip() if len(row) > 2 else '',
+                    'rank': row[4].strip() if len(row) > 4 else '',
+                    'source': source
+                }
+                
+                # Debug: print first few rows
+                if row_count <= 3:
+                    print(f"[DEBUG] Row {row_count}: {entry}")
+                
+                # Only add entries that have at least a title
+                if entry['title']:
                     results.append(entry)
+            
+            print(f"[DEBUG] Total rows parsed: {row_count}, entries added: {len(results)}")
+        
+        except Exception as e:
+            print(f"Error parsing CSV for source {source}: {e}")
+            import traceback
+            traceback.print_exc()
         
         return results
     
     def collect_all_years(self, for_code="4613", output_file="rankings_data.json"):
         """
-        Collect rankings for all available years and save to file
+        Collect rankings for all available sources and save to file
         
         Args:
             for_code: Field of Research code
@@ -110,14 +148,14 @@ class COREPortalScraper:
         """
         print(f"Collecting CORE rankings for FoR {for_code}...")
         
-        years = self.get_available_years()
-        print(f"Found years: {years}")
+        sources = self.get_available_years()
+        print(f"Found sources: {sources}")
         
         all_data = []
         
-        for year in years:
-            print(f"Fetching data for year {year}...")
-            results = self.search_for_code(for_code, year)
+        for source in sources:
+            print(f"Fetching data for source {source}...")
+            results = self.search_for_code(for_code, source)
             all_data.extend(results)
             time.sleep(1)  # Be polite to the server
         
@@ -142,7 +180,7 @@ def main():
     print("\nSample of collected data:")
     if data:
         for entry in data[:5]:
-            print(f"  {entry.get('year', 'N/A')}: {entry.get('title', 'N/A')} - Rank: {entry.get('rank', 'N/A')}")
+            print(f"  {entry.get('source', 'N/A')}: {entry.get('title', 'N/A')} - Rank: {entry.get('rank', 'N/A')}")
 
 
 if __name__ == "__main__":

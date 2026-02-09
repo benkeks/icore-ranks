@@ -19,9 +19,16 @@ git clone https://github.com/benkeks/icore-ranks.git
 cd icore-ranks
 ```
 
-2. Install required dependencies:
+2. Set up the project Python environment:
 ```bash
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+3. Activate the environment for future sessions:
+```bash
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
 ## Usage
@@ -31,7 +38,7 @@ pip install -r requirements.txt
 Run the collection script to scrape CORE portal for ranking information:
 
 ```bash
-python collect_rankings.py
+python3 collect_rankings.py
 ```
 
 This will:
@@ -45,7 +52,7 @@ This will:
 Generate visualizations from the collected data:
 
 ```bash
-python visualize_rankings.py
+python3 visualize_rankings.py
 ```
 
 This will create three plots:

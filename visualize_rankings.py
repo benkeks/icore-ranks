@@ -50,34 +50,57 @@ class RankingVisualizer:
         df = pd.DataFrame(self.data)
         
         # Clean and standardize the data
-        if 'year' in df.columns:
-            df['year'] = df['year'].astype(str)
+        if 'source' in df.columns:
+            df['source'] = df['source'].astype(str)
         
         if 'rank' in df.columns:
             # Normalize rank values
-            df['rank'] = df['rank'].str.strip().str.upper()
-            # Handle variations
-            df['rank'] = df['rank'].replace({
-                'A STAR': 'A*',
-                'ASTAR': 'A*',
-            })
+            df['rank'] = df['rank'].str.strip()
+            # Group similar ranks together
+            df['rank_group'] = df['rank'].apply(self._categorize_rank)
         
         return df
     
+    def _categorize_rank(self, rank):
+        """Categorize rank values into main categories"""
+        if not rank:
+            return 'Unranked'
+        
+        rank_upper = rank.upper().strip()
+        
+        if rank_upper.startswith('A*'):
+            return 'A*'
+        elif rank_upper.startswith('A'):
+            return 'A'
+        elif rank_upper.startswith('B'):
+            return 'B'
+        elif rank_upper.startswith('C'):
+            return 'C'
+        elif 'AUSTRALASIAN' in rank_upper or 'REGIONAL' in rank_upper:
+            return 'Australasian'
+        elif 'NATIONAL' in rank_upper:
+            return 'National'
+        else:
+            return 'Unranked'
+    
     def plot_rank_distribution_over_time(self, output_file="rank_distribution.png"):
-        """Create a stacked bar chart showing rank distribution over years"""
+        """Create a stacked bar chart showing rank distribution over sources"""
         df = self.prepare_dataframe()
         
         if df.empty:
             print("No data to plot!")
             return
         
-        # Count ranks per year
-        rank_counts = df.groupby(['year', 'rank']).size().unstack(fill_value=0)
+        # Count ranks per source
+        rank_counts = df.groupby(['source', 'rank_group']).size().unstack(fill_value=0)
         
         # Reorder columns by rank hierarchy
         available_ranks = [r for r in self.RANK_ORDER if r in rank_counts.columns]
         rank_counts = rank_counts[available_ranks]
+        
+        # Sort sources chronologically
+        source_order = sorted(rank_counts.index)
+        rank_counts = rank_counts.loc[source_order]
         
         # Create the plot
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -91,7 +114,7 @@ class RankingVisualizer:
             width=0.8
         )
         
-        ax.set_xlabel('Year', fontsize=12)
+        ax.set_xlabel('Edition/Source', fontsize=12)
         ax.set_ylabel('Number of Conferences', fontsize=12)
         ax.set_title('CORE Rankings Distribution Over Time\nField of Research: 4613 - Theory of Computation', 
                      fontsize=14, fontweight='bold')
@@ -109,53 +132,61 @@ class RankingVisualizer:
         plt.close()
         
     def plot_individual_conference_changes(self, output_file="conference_rank_changes.png", top_n=20):
-        """Plot how individual conferences' ranks changed over time"""
+        """Plot how individual conferences' ranks changed across sources"""
         df = self.prepare_dataframe()
         
         if df.empty:
             print("No data to plot!")
             return
         
-        # Find conferences that appear in multiple years
+        # Find conferences that appear in multiple sources
         conference_counts = df.groupby('acronym').size()
-        multi_year_conferences = conference_counts[conference_counts > 1].index
+        multi_source_conferences = conference_counts[conference_counts > 1].index
         
-        df_multi = df[df['acronym'].isin(multi_year_conferences)]
+        df_multi = df[df['acronym'].isin(multi_source_conferences)].copy()
         
         if df_multi.empty:
-            print("No conferences found with data across multiple years")
+            print("No conferences found with data across multiple sources")
             return
         
         # Select top N conferences by frequency
         top_conferences = df_multi['acronym'].value_counts().head(top_n).index
-        df_top = df_multi[df_multi['acronym'].isin(top_conferences)]
+        df_top = df_multi[df_multi['acronym'].isin(top_conferences)].copy()
         
         # Create rank to numeric mapping for plotting
         rank_to_num = {rank: i for i, rank in enumerate(reversed(self.RANK_ORDER))}
-        df_top['rank_num'] = df_top['rank'].map(rank_to_num)
+        df_top['rank_num'] = df_top['rank_group'].map(rank_to_num)
         
         # Create the plot
         fig, ax = plt.subplots(figsize=(14, 8))
         
+        # Convert source to numeric for plotting
+        unique_sources = sorted(df_top['source'].unique())
+        source_to_num = {s: i for i, s in enumerate(unique_sources)}
+        df_top['source_num'] = df_top['source'].map(source_to_num)
+        
         # Plot each conference
         for conf in top_conferences[:10]:  # Limit to 10 for readability
-            conf_data = df_top[df_top['acronym'] == conf].sort_values('year')
+            conf_data = df_top[df_top['acronym'] == conf].sort_values('source_num')
             if len(conf_data) > 1:
-                ax.plot(conf_data['year'], conf_data['rank_num'], 
+                ax.plot(conf_data['source_num'], conf_data['rank_num'], 
                        marker='o', label=conf, linewidth=2, markersize=6)
         
         # Set y-axis labels to rank names
         ax.set_yticks(range(len(self.RANK_ORDER)))
         ax.set_yticklabels(reversed(self.RANK_ORDER))
         
-        ax.set_xlabel('Year', fontsize=12)
+        # Set x-axis labels to sources
+        ax.set_xticks(range(len(unique_sources)))
+        ax.set_xticklabels(unique_sources, rotation=45)
+        
+        ax.set_xlabel('Edition/Source', fontsize=12)
         ax.set_ylabel('CORE Rank', fontsize=12)
         ax.set_title('Conference Ranking Changes Over Time\nField of Research: 4613 - Theory of Computation',
                      fontsize=14, fontweight='bold')
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
         ax.grid(True, alpha=0.3)
         
-        plt.xticks(rotation=45)
         plt.tight_layout()
         
         # Save the plot
@@ -166,27 +197,27 @@ class RankingVisualizer:
         plt.close()
     
     def plot_rank_transitions(self, output_file="rank_transitions.png"):
-        """Plot a heatmap of rank transitions year-over-year"""
+        """Plot a heatmap of rank transitions source-to-source"""
         df = self.prepare_dataframe()
         
         if df.empty:
             print("No data to plot!")
             return
         
-        # Find conferences with consecutive year data
+        # Find conferences with consecutive source data
         transitions = []
         
         for conf in df['acronym'].unique():
-            conf_data = df[df['acronym'] == conf].sort_values('year')
+            conf_data = df[df['acronym'] == conf].sort_values('source')
             if len(conf_data) > 1:
                 for i in range(len(conf_data) - 1):
-                    from_rank = conf_data.iloc[i]['rank']
-                    to_rank = conf_data.iloc[i + 1]['rank']
-                    year = conf_data.iloc[i + 1]['year']
+                    from_rank = conf_data.iloc[i]['rank_group']
+                    to_rank = conf_data.iloc[i + 1]['rank_group']
+                    source = conf_data.iloc[i + 1]['source']
                     transitions.append({
                         'from': from_rank,
                         'to': to_rank,
-                        'year': year,
+                        'source': source,
                         'conference': conf
                     })
         
@@ -218,7 +249,7 @@ class RankingVisualizer:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(transition_text)
         ax.set_xlabel('Number of Transitions', fontsize=12)
-        ax.set_title('Top Rank Transitions Year-over-Year\nField of Research: 4613 - Theory of Computation',
+        ax.set_title('Top Rank Transitions Across Editions\nField of Research: 4613 - Theory of Computation',
                      fontsize=14, fontweight='bold')
         ax.grid(axis='x', alpha=0.3)
         
@@ -244,14 +275,14 @@ class RankingVisualizer:
         print("Field of Research: 4613 - Theory of Computation")
         print("="*60)
         
-        if 'year' in df.columns:
-            print(f"\nYears covered: {df['year'].min()} to {df['year'].max()}")
+        if 'source' in df.columns:
+            print(f"\nEditions covered: {sorted(df['source'].unique())}")
             print(f"Total entries: {len(df)}")
             print(f"Unique conferences: {df['acronym'].nunique()}")
         
-        if 'rank' in df.columns:
+        if 'rank_group' in df.columns:
             print("\nRank distribution:")
-            rank_dist = df['rank'].value_counts().sort_index()
+            rank_dist = df['rank_group'].value_counts().sort_index()
             for rank, count in rank_dist.items():
                 print(f"  {rank}: {count} ({count/len(df)*100:.1f}%)")
         
@@ -259,7 +290,7 @@ class RankingVisualizer:
         conferences_with_changes = 0
         for conf in df['acronym'].unique():
             conf_data = df[df['acronym'] == conf]
-            if conf_data['rank'].nunique() > 1:
+            if conf_data['rank_group'].nunique() > 1:
                 conferences_with_changes += 1
         
         print(f"\nConferences with rank changes: {conferences_with_changes}")
