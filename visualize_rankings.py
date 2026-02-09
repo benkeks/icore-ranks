@@ -5,6 +5,7 @@ Script to visualize CORE ranking changes over the years
 
 import json
 import os
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -132,67 +133,129 @@ class RankingVisualizer:
         plt.close()
         
     def plot_individual_conference_changes(self, output_file="conference_rank_changes.png", top_n=20):
-        """Plot how individual conferences' ranks changed across sources"""
+        """Plot how individual conferences' ranks changed across sources
+        
+        Includes all conferences with at least one A*, A, or B rank, with visual 
+        disambiguation for conferences at the same rank level.
+        """
         df = self.prepare_dataframe()
         
         if df.empty:
             print("No data to plot!")
             return
         
-        # Find conferences that appear in multiple sources
-        conference_counts = df.groupby('acronym').size()
-        multi_source_conferences = conference_counts[conference_counts > 1].index
+        # Find conferences that have at least one A*, A, or B rank at any point
+        top_ranks = df[df['rank_group'].isin(['A*', 'A', 'B'])]
+        target_conferences = top_ranks['acronym'].unique()
         
-        df_multi = df[df['acronym'].isin(multi_source_conferences)].copy()
+        # Get all data for these conferences (including times they drop below B)
+        df_target = df[df['acronym'].isin(target_conferences)].copy()
         
-        if df_multi.empty:
-            print("No conferences found with data across multiple sources")
+        if df_target.empty:
+            print("No A*, A, or B conferences found")
             return
         
-        # Select top N conferences by frequency
-        top_conferences = df_multi['acronym'].value_counts().head(top_n).index
-        df_top = df_multi[df_multi['acronym'].isin(top_conferences)].copy()
-        
-        # Create rank to numeric mapping for plotting
-        rank_to_num = {rank: i for i, rank in enumerate(reversed(self.RANK_ORDER))}
-        df_top['rank_num'] = df_top['rank_group'].map(rank_to_num)
+        # Create rank to numeric mapping for plotting, excluding Australasian from display
+        display_rank_order = [r for r in self.RANK_ORDER if r != 'Australasian']
+        rank_to_num = {rank: i for i, rank in enumerate(reversed(display_rank_order))}
+        df_target['rank_num'] = df_target['rank_group'].map(rank_to_num)
         
         # Create the plot
-        fig, ax = plt.subplots(figsize=(14, 8))
+        fig, ax = plt.subplots(figsize=(18, 12))
         
         # Convert source to numeric for plotting
-        unique_sources = sorted(df_top['source'].unique())
+        unique_sources = sorted(df_target['source'].unique())
         source_to_num = {s: i for i, s in enumerate(unique_sources)}
-        df_top['source_num'] = df_top['source'].map(source_to_num)
+        df_target['source_num'] = df_target['source'].map(source_to_num)
+        
+        # Line styles, markers, and line widths for disambiguation
+        line_styles = ['-', '--', '-.', ':', '-', '--', '-.', ':']
+        markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', 'h', 'X', '+']
+        line_widths = [1.0, 1.5, 1.0, 1.5, 1.0, 1.5, 1.0, 1.5]
+        
+        # Create mapping of conference to color (cycle through extended palette)
+        sorted_conferences = sorted(target_conferences)
+        n_confs = len(sorted_conferences)
+        colors_list = plt.cm.tab20c(range(n_confs % 20))
+        if n_confs > 20:
+            colors_list = plt.cm.get_cmap('hsv')(np.linspace(0, 0.95, n_confs))
+        
+        # Calculate jitter for each rank level, accounting for number of conferences
+        # but ensuring no collision between rank levels
+        rank_jitters = {}
+        rank_counts = {}
+        
+        # First pass: count conferences at each rank
+        for rank in display_rank_order:
+            confs_at_rank = [c for c in sorted_conferences if df_target[(df_target['acronym'] == c) & (df_target['rank_group'] == rank)].shape[0] > 0]
+            rank_counts[rank] = len(confs_at_rank)
+        
+        # Second pass: assign jitter values with balanced range
+        for rank in display_rank_order:
+            confs_at_rank = [c for c in sorted_conferences if df_target[(df_target['acronym'] == c) & (df_target['rank_group'] == rank)].shape[0] > 0]
+            n_at_rank = len(confs_at_rank)
+            
+            if n_at_rank > 0:
+                # Max jitter range is 0.45 to allow good spread while avoiding rank level collision
+                # Scale within this range based on number of conferences
+                max_jitter = 0.45
+                jitter_scale = np.sqrt(n_at_rank) / np.sqrt(64)  # Normalize by typical max (64 at C rank)
+                jitter_scale = min(1.0, jitter_scale)  # Cap at 1.0
+                effective_jitter_range = max_jitter * jitter_scale
+                
+                # Spread conferences evenly around their rank level
+                jitter_values = np.linspace(-effective_jitter_range, effective_jitter_range, n_at_rank)
+                for conf, jitter in zip(confs_at_rank, jitter_values):
+                    if conf not in rank_jitters:
+                        rank_jitters[conf] = {}
+                    rank_jitters[conf][rank] = jitter
         
         # Plot each conference
-        for conf in top_conferences[:10]:  # Limit to 10 for readability
-            conf_data = df_top[df_top['acronym'] == conf].sort_values('source_num')
-            if len(conf_data) > 1:
-                ax.plot(conf_data['source_num'], conf_data['rank_num'], 
-                       marker='o', label=conf, linewidth=2, markersize=6)
+        for idx, conf in enumerate(sorted_conferences):
+            conf_data = df_target[df_target['acronym'] == conf].sort_values('source_num')
+            if len(conf_data) > 0:
+                # Apply rank-specific jitter
+                y_values = []
+                for _, row in conf_data.iterrows():
+                    base_y = row['rank_num']
+                    jitter = rank_jitters.get(conf, {}).get(row['rank_group'], 0)
+                    y_values.append(base_y + jitter)
+                
+                line_style = line_styles[idx % len(line_styles)]
+                marker = markers[idx % len(markers)]
+                line_width = line_widths[idx % len(line_widths)]
+                color = colors_list[idx % len(colors_list)]
+                
+                ax.plot(conf_data['source_num'].values, y_values, 
+                       marker=marker, linestyle=line_style, 
+                       label=conf, linewidth=line_width, markersize=4, 
+                       color=color, alpha=0.85)
         
-        # Set y-axis labels to rank names
-        ax.set_yticks(range(len(self.RANK_ORDER)))
-        ax.set_yticklabels(reversed(self.RANK_ORDER))
+        # Set y-axis labels to rank names (excluding Australasian)
+        ax.set_yticks(range(len(display_rank_order)))
+        ax.set_yticklabels(reversed(display_rank_order), fontsize=13)
         
         # Set x-axis labels to sources
         ax.set_xticks(range(len(unique_sources)))
-        ax.set_xticklabels(unique_sources, rotation=45)
+        ax.set_xticklabels(unique_sources, rotation=45, fontsize=13)
         
-        ax.set_xlabel('Edition/Source', fontsize=12)
-        ax.set_ylabel('CORE Rank', fontsize=12)
-        ax.set_title('Conference Ranking Changes Over Time\nField of Research: 4613 - Theory of Computation',
-                     fontsize=14, fontweight='bold')
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+        ax.set_xlabel('Edition/Source', fontsize=16)
+        ax.set_ylabel('CORE Rank', fontsize=16)
+        ax.set_title(f'Conference Ranking Changes Over Time (All A*, A, B Conferences)\nField of Research: 4613 - Theory of Computation',
+                     fontsize=20, fontweight='bold')
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=11, ncol=2)
         ax.grid(True, alpha=0.3)
+        
+        # Add note about jitter
+        ax.text(0.02, 0.02, 'Note: Y-positions within one rank level are jittered to avoid overlap', 
+               transform=ax.transAxes, fontsize=12, style='italic', color='gray')
         
         plt.tight_layout()
         
         # Save the plot
         output_path = os.path.join(os.path.dirname(__file__), output_file)
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        print(f"Saved plot to {output_path}")
+        print(f"Saved plot to {output_path} ({len(target_conferences)} A*, A, B conferences)")
         
         plt.close()
     
