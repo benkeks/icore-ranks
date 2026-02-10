@@ -1,15 +1,12 @@
 # CORE Rankings Collection and Visualization
 
-This repository contains Python scripts to collect and visualize CORE (CORE Conference Ranking) information from the CORE portal (https://portal.core.edu.au/) for Field Of Research: 4613 - Theory of computation.
+Scripts to collect and visualize CORE conference rankings from https://portal.core.edu.au/.
 
 ## Features
-
-- **Data Collection**: Automatically scrape CORE portal for ranking information across multiple years
-- **Data Visualization**: Generate multiple plots showing:
-  - Rank distribution over time (stacked bar chart)
-  - Individual conference ranking changes (line plot)
-  - Rank transitions year-over-year (bar chart)
-- **Summary Statistics**: Generate comprehensive statistics about the collected data
+- Collect all conferences across all editions (CSV export)
+- Store FoR codes per conference
+- Visualize ranking trends for a filtered subset (default: FoR 4613 conferences present in ICORE2026)
+- Exclude ERA2010 from visualizations (incompatible ranking)
 
 ## Installation
 
@@ -33,58 +30,35 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ## Usage
 
-### Step 1: Collect Rankings Data
-
-Run the collection script to scrape CORE portal for ranking information:
-
+### 1) Collect rankings
 ```bash
 python3 collect_rankings.py
 ```
+Outputs `rankings_data.json` (all editions, all fields). Rate limiting is built in.
 
-This will:
-- Fetch ranking data for FoR 4613 (Theory of computation) across all available years
-- Save the data to `rankings_data.json`
-
-**Note**: The script is designed to be polite to the server with rate limiting. The collection process may take a few minutes depending on the number of years available.
-
-### Step 2: Visualize the Data
-
-Generate visualizations from the collected data:
-
+### 2) Generate visualizations
 ```bash
 python3 visualize_rankings.py
 ```
-
-This will create three plots:
-- `rank_distribution.png`: Shows how many conferences had each rank over the years
-- `conference_rank_changes.png`: Tracks individual conferences' ranking changes
-- `rank_transitions.png`: Shows the most common rank transitions
-
-The script also prints summary statistics to the console.
+Creates plots for FoR 4613 conferences that appear in ICORE2026.
 
 ## Output Files
+- `rankings_data.json`
+- `rank_distribution.png`
+- `conference_rank_changes.png`
+- `rank_transitions.png`
+- `rank_migrations.png`
 
-After running both scripts, you'll have:
-
-- `rankings_data.json`: Raw collected data in JSON format
-- `rank_distribution.png`: Stacked bar chart of rank distribution over time
-- `conference_rank_changes.png`: Line plot of individual conference rankings
-- `rank_transitions.png`: Bar chart of rank transitions
-
-## Data Structure
-
-The collected data is stored in JSON format with the following structure:
-
+## Data Structure (JSON)
 ```json
-[
-  {
-    "title": "Conference Full Name",
-    "acronym": "CONF",
-    "rank": "A*",
-    "year": "2023"
-  },
-  ...
-]
+{
+  "id": "2172",
+  "title": "Conference Full Name",
+  "acronym": "CONF",
+  "rank": "A*",
+  "source": "ICORE2026",
+  "for_codes": ["4613", "4605"]
+}
 ```
 
 ## CORE Ranking Levels
@@ -107,10 +81,8 @@ The CORE rankings use the following tiers (from highest to lowest):
 - lxml
 
 ## Notes
-
-- The scraping script is designed to respect the CORE portal's server with appropriate delays between requests
-- If the portal structure changes, the parsing logic in `collect_rankings.py` may need to be updated
-- The scripts are focused on FoR 4613 (Theory of computation), but can be adapted for other fields by modifying the `for_code` parameter
+- Visualizations ignore ERA2010.
+- Adjust filtering inside `visualize_rankings.py` if you want a different FoR or edition.
 
 ## License
 

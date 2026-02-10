@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Script to collect CORE ranking information from CORE portal
-for Field Of Research: 4613 - Theory of computation
+for all conferences across all editions
 """
 
 import requests
@@ -51,20 +51,19 @@ class COREPortalScraper:
             # Return a default list if we can't fetch
             return ['ICORE2026', 'CORE2023', 'CORE2021', 'CORE2020', 'CORE2018', 'CORE2017', 'CORE2014', 'CORE2013', 'ERA2010', 'CORE2008']
     
-    def search_for_code(self, for_code="4613", source=None):
+    def search_for_source(self, source=None):
         """
-        Search for conferences with the given Field of Research code via CSV export
+        Download all conference rankings for a given source/edition via CSV export
         
         Args:
-            for_code: Field of Research code (default: 4613 - Theory of computation)
             source: Specific source to query (e.g., 'ICORE2026', 'CORE2023')
         
         Returns:
             List of conference entries with their rankings
         """
         params = {
-            'search': for_code,
-            'by': 'for',
+            'search': '',
+            'by': 'all',
             'sort': 'atitle',
             'page': '1',
             'do': 'Export'
@@ -82,7 +81,7 @@ class COREPortalScraper:
             print(f"[DEBUG] First 500 chars of CSV:\n{response.text[:500]}")
             return self.parse_csv_results(response.text, source)
         except Exception as e:
-            print(f"Error searching for code {for_code} (source: {source}): {e}")
+            print(f"Error downloading data for source {source}: {e}")
             return []
     
     def parse_csv_results(self, csv_content, source):
@@ -113,12 +112,18 @@ class COREPortalScraper:
                     continue
                 
                 # Extract fields by column index
+                # Extract FoR codes (column 6 onwards, semicolon-separated)
+                for_codes = []
+                if len(row) > 6:
+                    for_codes = [code.strip() for code in row[6:] if code.strip()]
+                
                 entry = {
                     'id': row[0].strip() if len(row) > 0 else '',
                     'title': row[1].strip() if len(row) > 1 else '',
                     'acronym': row[2].strip() if len(row) > 2 else '',
                     'rank': row[4].strip() if len(row) > 4 else '',
-                    'source': source
+                    'source': source,
+                    'for_codes': for_codes
                 }
                 
                 # Debug: print first few rows
@@ -138,15 +143,14 @@ class COREPortalScraper:
         
         return results
     
-    def collect_all_years(self, for_code="4613", output_file="rankings_data.json"):
+    def collect_all_years(self, output_file="rankings_data.json"):
         """
-        Collect rankings for all available sources and save to file
+        Collect rankings for all available sources/editions and save to file
         
         Args:
-            for_code: Field of Research code
             output_file: Output JSON file path
         """
-        print(f"Collecting CORE rankings for FoR {for_code}...")
+        print(f"Collecting all CORE rankings...")
         
         sources = self.get_available_years()
         print(f"Found sources: {sources}")
@@ -155,7 +159,7 @@ class COREPortalScraper:
         
         for source in sources:
             print(f"Fetching data for source {source}...")
-            results = self.search_for_code(for_code, source)
+            results = self.search_for_source(source)
             all_data.extend(results)
             time.sleep(1)  # Be polite to the server
         
@@ -174,8 +178,8 @@ def main():
     """Main execution function"""
     scraper = COREPortalScraper()
     
-    # Collect rankings for FoR 4613 - Theory of computation
-    data = scraper.collect_all_years(for_code="4613", output_file="rankings_data.json")
+    # Collect rankings for all conferences across all editions
+    data = scraper.collect_all_years(output_file="rankings_data.json")
     
     print("\nSample of collected data:")
     if data:

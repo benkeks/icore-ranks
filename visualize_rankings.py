@@ -43,16 +43,38 @@ class RankingVisualizer:
         print(f"Loaded {len(data)} ranking entries")
         return data
     
-    def prepare_dataframe(self):
-        """Convert data to pandas DataFrame for analysis"""
+    def prepare_dataframe(self, filter_for_code=None, filter_source=None):
+        """Convert data to pandas DataFrame for analysis
+        
+        Args:
+            filter_for_code: If provided, only include conferences with this FoR code in filter_source
+            filter_source: Source edition to check for FoR code (e.g., 'ICORE2026')
+        """
         if not self.data:
             return pd.DataFrame()
         
         df = pd.DataFrame(self.data)
         
+        # Apply FoR filtering if requested
+        if filter_for_code and filter_source:
+            # Find conferences that have the specified FoR code in the specified source
+            target_conferences = set()
+            for entry in self.data:
+                if entry.get('source') == filter_source and 'for_codes' in entry:
+                    if filter_for_code in entry['for_codes']:
+                        target_conferences.add(entry['acronym'])
+            
+            if target_conferences:
+                print(f"Filtering to {len(target_conferences)} conferences with FoR {filter_for_code} in {filter_source}")
+                df = df[df['acronym'].isin(target_conferences)]
+            else:
+                print(f"Warning: No conferences found with FoR {filter_for_code} in {filter_source}")
+        
         # Clean and standardize the data
         if 'source' in df.columns:
             df['source'] = df['source'].astype(str)
+            # Exclude ERA2010 due to incompatible ranking
+            df = df[df['source'] != 'ERA2010']
         
         if 'rank' in df.columns:
             # Normalize rank values
@@ -155,6 +177,19 @@ class RankingVisualizer:
             print("No A*, A, or B conferences found")
             return
         
+        # Remove duplicates (keep first entry per conference-source pair)
+        df_target = df_target.drop_duplicates(subset=['acronym', 'source'], keep='first')
+        
+        # Ensure conferences that appear later or drop out are shown as Unranked
+        all_sources = sorted(df['source'].unique())
+        full_index = pd.MultiIndex.from_product(
+            [target_conferences, all_sources],
+            names=['acronym', 'source']
+        )
+        df_target = df_target.set_index(['acronym', 'source']).reindex(full_index).reset_index()
+        df_target['rank_group'] = df_target['rank_group'].fillna('Unranked')
+        df_target['rank'] = df_target['rank'].fillna('Unranked')
+
         # Create rank to numeric mapping for plotting, excluding Australasian from display
         display_rank_order = [r for r in self.RANK_ORDER if r != 'Australasian']
         rank_to_num = {rank: i for i, rank in enumerate(reversed(display_rank_order))}
@@ -489,7 +524,17 @@ class RankingVisualizer:
 
 def main():
     """Main execution function"""
+    import sys
+    
     visualizer = RankingVisualizer("rankings_data.json")
+    
+    # Check if filtering for Theory of Computation in 2026
+    filter_for_code = "4613"  # Theory of Computation
+    filter_source = "ICORE2026"
+    
+    # Temporarily override prepare_dataframe to use filtering
+    original_prepare = visualizer.prepare_dataframe
+    visualizer.prepare_dataframe = lambda: original_prepare(filter_for_code=filter_for_code, filter_source=filter_source)
     
     # Generate summary statistics
     visualizer.generate_summary_stats()
