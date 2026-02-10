@@ -7,6 +7,7 @@ import json
 import os
 import numpy as np
 import pandas as pd
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from collections import defaultdict
@@ -21,10 +22,11 @@ class RankingVisualizer:
         'B': '#ff7f0e',    # Orange
         'C': '#d62728',    # Red
         'Australasian': '#9467bd',  # Purple
+        'National': '#8c564b',  # Brown
         'Unranked': '#7f7f7f'  # Gray
     }
     
-    RANK_ORDER = ['A*', 'A', 'B', 'C', 'Australasian', 'Unranked']
+    RANK_ORDER = ['A*', 'A', 'B', 'C', 'Australasian', 'National', 'Unranked']
     
     def __init__(self, data_file="rankings_data.json"):
         """Initialize with path to data file"""
@@ -213,7 +215,7 @@ class RankingVisualizer:
         n_confs = len(sorted_conferences)
         colors_list = plt.cm.tab20c(range(n_confs % 20))
         if n_confs > 20:
-            colors_list = plt.cm.get_cmap('hsv')(np.linspace(0, 0.95, n_confs))
+            colors_list = matplotlib.colormaps.get_cmap('hsv')(np.linspace(0, 0.95, n_confs))
         
         # Calculate jitter for each rank level, accounting for number of conferences
         # but ensuring no collision between rank levels
@@ -524,8 +526,6 @@ class RankingVisualizer:
 
 def main():
     """Main execution function"""
-    import sys
-    
     visualizer = RankingVisualizer("rankings_data.json")
     
     # Check if filtering for Theory of Computation in 2026
