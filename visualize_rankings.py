@@ -10,6 +10,8 @@ import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.patheffects as pe
+from matplotlib.collections import LineCollection
 from collections import defaultdict
 
 
@@ -107,6 +109,32 @@ class RankingVisualizer:
             return 'National'
         else:
             return 'Unranked'
+
+    def _draw_gradient_line(self, ax, x0, y0, x1, y1, color_start, color_end, linewidth, alpha=0.9, steps=120):
+        """Draw a straight line with a color gradient from start color to end color."""
+        x_vals = np.linspace(x0, x1, steps)
+        y_vals = np.linspace(y0, y1, steps)
+        points = np.array([x_vals, y_vals]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+        start_rgba = np.array(matplotlib.colors.to_rgba(color_start, alpha=alpha))
+        end_rgba = np.array(matplotlib.colors.to_rgba(color_end, alpha=alpha))
+        mix = np.linspace(0.0, 1.0, len(segments))[:, None]
+        segment_colors = start_rgba * (1.0 - mix) + end_rgba * mix
+
+        line_collection = LineCollection(
+            segments,
+            colors=segment_colors,
+            linewidths=linewidth,
+            capstyle='round',
+            zorder=1
+        )
+        outline_width = linewidth + max(0.8, linewidth * 0.12)
+        line_collection.set_path_effects([
+            pe.Stroke(linewidth=outline_width, foreground='white', alpha=0.35),
+            pe.Normal()
+        ])
+        ax.add_collection(line_collection)
     
     def plot_rank_distribution_over_time(self, output_file="rank_distribution.png"):
         """Create a stacked bar chart showing rank distribution over sources"""
@@ -437,32 +465,96 @@ class RankingVisualizer:
                         to_rank = conf_data_to.iloc[0]['rank_group']
                         transitions[(from_rank, to_rank)] += 1
                 
-                # Draw flow lines with thickness based on count
+                # Draw flow lines with stronger visual encoding for easier comparison
                 x_from = x_pos + 0.4
                 x_to = x_pos + 4 - 0.4
                 
                 max_transition_count = max(transitions.values()) if transitions else 1
-                
-                for (from_rank, to_rank), count in transitions.items():
+
+                # Spread labels vertically to avoid overlap
+                label_lane_offsets = defaultdict(int)
+
+                # Draw thicker/high-volume transitions first
+                sorted_transitions = sorted(
+                    transitions.items(),
+                    key=lambda item: item[1],
+                    reverse=True
+                )
+
+                for (from_rank, to_rank), count in sorted_transitions:
                     if from_rank in y_positions[source] and to_rank in y_positions[next_source]:
                         y_from_min, y_from_max = y_positions[source][from_rank]
                         y_to_min, y_to_max = y_positions[next_source][to_rank]
                         
                         from_y = (y_from_min + y_from_max) / 2
                         to_y = (y_to_min + y_to_max) / 2
+
+                        # Offset start/end points based on movement direction
+                        # (not whole-lane shifts):
+                        # - upward flow: start up, end down
+                        # - downward flow: start down, end up
+                        if to_y > from_y:
+                            direction = 1
+                        elif to_y < from_y:
+                            direction = -1
+                        else:
+                            direction = 0
+
+                        endpoint_offset = 0.6 + (count / max_transition_count) * 0.25
+                        from_y_shifted = from_y + direction * endpoint_offset
+                        to_y_shifted = to_y - direction * endpoint_offset
                         
-                        # Line width proportional to count
-                        line_width = 1 + (count / max_transition_count) * 3
+                        # Tiered thickness:
+                        # - very small transfers (1,2) are thinner
+                        # - large transfers are much thicker (~2x previous max)
+                        if count == 1:
+                            line_width = 0.9
+                        elif count == 2:
+                            line_width = 1.4
+                        else:
+                            width_norm = (count - 2) / max(1, max_transition_count - 2)
+                            line_width = 3.0 + (width_norm ** 1.35) * 40.0
+                        from_color = rank_colors.get(from_rank, '#7f7f7f')
+                        to_color = rank_colors.get(to_rank, '#7f7f7f')
+                        self._draw_gradient_line(
+                            ax,
+                            x_from,
+                            from_y_shifted,
+                            x_to,
+                            to_y_shifted,
+                            color_start=from_color,
+                            color_end=to_color,
+                            linewidth=line_width,
+                            alpha=0.92,
+                            steps=140
+                        )
                         
-                        ax.plot([x_from, x_to], [from_y, to_y], color='gray', 
-                               alpha=0.4, linewidth=line_width, zorder=1)
-                        
-                        # Add count label on flow line
-                        mid_x = (x_from + x_to) / 2
-                        mid_y = (from_y + to_y) / 2
-                        ax.text(mid_x, mid_y, str(count), fontsize=8, 
-                               ha='center', va='bottom', 
-                               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+                        # Add larger count labels with lane offsets to reduce overlap
+                        mid_x = x_from + (x_to - x_from) * 0.55
+                        mid_y = (from_y_shifted + to_y_shifted) / 2
+                        lane_key = int(round(mid_y / 2.0))
+                        lane_offset = (label_lane_offsets[lane_key] % 4 - 1.5) * 0.35
+                        label_lane_offsets[lane_key] += 1
+
+                        label_fontsize = 9 + min(3, int((count / max_transition_count) * 3))
+                        ax.text(
+                            mid_x,
+                            mid_y + lane_offset,
+                            str(count),
+                            fontsize=label_fontsize,
+                            fontweight='bold',
+                            color='black',
+                            ha='center',
+                            va='center',
+                            bbox=dict(
+                                boxstyle='round,pad=0.22',
+                                facecolor='white',
+                                edgecolor='black',
+                                linewidth=0.6,
+                                alpha=0.9
+                            ),
+                            zorder=3
+                        )
         
         # Set axis properties
         ax.set_xlim(-1, len(unique_sources) * 4)
