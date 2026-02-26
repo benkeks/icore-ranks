@@ -453,6 +453,30 @@ class RankingVisualizer:
                 count = rank_counts.get(rank, 0)
                 y_positions[source][rank] = (current_y, current_y + count)
                 current_y += count + 0.5
+
+        # Precompute transitions for each adjacent source pair and a global max count
+        # so line widths are comparable across all years.
+        pair_transition_counts = {}
+        global_max_transition_count = 1
+
+        for source_idx in range(len(unique_sources) - 1):
+            source = unique_sources[source_idx]
+            next_source = unique_sources[source_idx + 1]
+
+            transitions = defaultdict(int)
+            for conf in df[df['acronym'].isin(df[df['source'] == source]['acronym']) &
+                           df['source'].isin([source, next_source])]['acronym'].unique():
+                conf_data_from = df[(df['acronym'] == conf) & (df['source'] == source)]
+                conf_data_to = df[(df['acronym'] == conf) & (df['source'] == next_source)]
+
+                if len(conf_data_from) > 0 and len(conf_data_to) > 0:
+                    from_rank = conf_data_from.iloc[0]['rank_group']
+                    to_rank = conf_data_to.iloc[0]['rank_group']
+                    transitions[(from_rank, to_rank)] += 1
+
+            pair_transition_counts[(source, next_source)] = transitions
+            if transitions:
+                global_max_transition_count = max(global_max_transition_count, max(transitions.values()))
         
         # Draw boxes and flows
         for source_idx, source in enumerate(unique_sources):
@@ -475,24 +499,13 @@ class RankingVisualizer:
             # Draw flows to next source
             if source_idx < len(unique_sources) - 1:
                 next_source = unique_sources[source_idx + 1]
-                
-                # Count transitions between each pair of ranks
-                transitions = defaultdict(int)
-                for conf in df[df['acronym'].isin(df[df['source'] == source]['acronym']) & 
-                               df['source'].isin([source, next_source])]['acronym'].unique():
-                    conf_data_from = df[(df['acronym'] == conf) & (df['source'] == source)]
-                    conf_data_to = df[(df['acronym'] == conf) & (df['source'] == next_source)]
-                    
-                    if len(conf_data_from) > 0 and len(conf_data_to) > 0:
-                        from_rank = conf_data_from.iloc[0]['rank_group']
-                        to_rank = conf_data_to.iloc[0]['rank_group']
-                        transitions[(from_rank, to_rank)] += 1
+                transitions = pair_transition_counts.get((source, next_source), defaultdict(int))
                 
                 # Draw flow lines with stronger visual encoding for easier comparison
                 x_from = x_pos + 0.4
                 x_to = x_pos + 4 - 0.4
-                
-                max_transition_count = max(transitions.values()) if transitions else 1
+
+                max_transition_count = global_max_transition_count
 
                 # Spread labels vertically to avoid overlap
                 label_lane_offsets = defaultdict(int)
