@@ -34,6 +34,26 @@ class RankingVisualizer:
         """Initialize with path to data file"""
         self.data_file = os.path.join(os.path.dirname(__file__), data_file)
         self.data = self.load_data()
+        self.filter_for_code = None
+        self.filter_source = None
+        self.for_code_names = {
+            '4613': 'Theory of Computation'
+        }
+
+    def configure_filter(self, filter_for_code=None, filter_source=None):
+        """Configure default FoR/source filter for all plots and stats."""
+        self.filter_for_code = filter_for_code
+        self.filter_source = filter_source
+
+    def _format_for_label(self):
+        """Format FoR label with code and optional known name."""
+        if not self.filter_for_code:
+            return "Field of Research: All"
+
+        area_name = self.for_code_names.get(self.filter_for_code)
+        if area_name:
+            return f"Field of Research: {self.filter_for_code} - {area_name}"
+        return f"Field of Research: {self.filter_for_code}"
         
     def load_data(self):
         """Load ranking data from JSON file"""
@@ -59,20 +79,23 @@ class RankingVisualizer:
         
         df = pd.DataFrame(self.data)
         
+        active_filter_code = filter_for_code if filter_for_code is not None else self.filter_for_code
+        active_filter_source = filter_source if filter_source is not None else self.filter_source
+
         # Apply FoR filtering if requested
-        if filter_for_code and filter_source:
+        if active_filter_code and active_filter_source:
             # Find conferences that have the specified FoR code in the specified source
             target_conferences = set()
             for entry in self.data:
-                if entry.get('source') == filter_source and 'for_codes' in entry:
-                    if filter_for_code in entry['for_codes']:
+                if entry.get('source') == active_filter_source and 'for_codes' in entry:
+                    if active_filter_code in entry['for_codes']:
                         target_conferences.add(entry['acronym'])
             
             if target_conferences:
-                print(f"Filtering to {len(target_conferences)} conferences with FoR {filter_for_code} in {filter_source}")
+                print(f"Filtering to {len(target_conferences)} conferences with FoR {active_filter_code} in {active_filter_source}")
                 df = df[df['acronym'].isin(target_conferences)]
             else:
-                print(f"Warning: No conferences found with FoR {filter_for_code} in {filter_source}")
+                print(f"Warning: No conferences found with FoR {active_filter_code} in {active_filter_source}")
         
         # Clean and standardize the data
         if 'source' in df.columns:
@@ -169,7 +192,7 @@ class RankingVisualizer:
         
         ax.set_xlabel('Edition/Source', fontsize=12)
         ax.set_ylabel('Number of Conferences', fontsize=12)
-        ax.set_title('CORE Rankings Distribution Over Time\nField of Research: 4613 - Theory of Computation', 
+        ax.set_title(f'CORE Rankings Distribution Over Time\n{self._format_for_label()}', 
                      fontsize=14, fontweight='bold')
         ax.legend(title='Rank', bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(axis='y', alpha=0.3)
@@ -306,7 +329,7 @@ class RankingVisualizer:
         
         ax.set_xlabel('Edition/Source', fontsize=16)
         ax.set_ylabel('CORE Rank', fontsize=16)
-        ax.set_title(f'Conference Ranking Changes Over Time (All A*, A, B Conferences)\nField of Research: 4613 - Theory of Computation',
+        ax.set_title(f'Conference Ranking Changes Over Time (All A*, A, B Conferences)\n{self._format_for_label()}',
                      fontsize=20, fontweight='bold')
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=11, ncol=2)
         ax.grid(True, alpha=0.3)
@@ -377,7 +400,7 @@ class RankingVisualizer:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(transition_text)
         ax.set_xlabel('Number of Transitions', fontsize=12)
-        ax.set_title('Top Rank Transitions Across Editions\nField of Research: 4613 - Theory of Computation',
+        ax.set_title(f'Top Rank Transitions Across Editions\n{self._format_for_label()}',
                      fontsize=14, fontweight='bold')
         ax.grid(axis='x', alpha=0.3)
         
@@ -569,7 +592,7 @@ class RankingVisualizer:
             x_pos = source_idx * 4
             ax.text(x_pos, all_y_max + 1.5, source, fontsize=13, fontweight='bold', ha='center')
         
-        ax.set_title('Conference Migrations Between Ranks Across Editions\nField of Research: 4613 - Theory of Computation',
+        ax.set_title(f'Conference Migrations Between Ranks Across Editions\n{self._format_for_label()}',
                      fontsize=16, fontweight='bold', pad=20)
         
         plt.tight_layout()
@@ -591,7 +614,7 @@ class RankingVisualizer:
         
         print("\n" + "="*60)
         print("CORE Rankings Summary Statistics")
-        print("Field of Research: 4613 - Theory of Computation")
+        print(self._format_for_label())
         print("="*60)
         
         if 'source' in df.columns:
@@ -620,13 +643,9 @@ def main():
     """Main execution function"""
     visualizer = RankingVisualizer("rankings_data.json")
     
-    # Check if filtering for Theory of Computation in 2026
     filter_for_code = "4613"  # Theory of Computation
     filter_source = "ICORE2026"
-    
-    # Temporarily override prepare_dataframe to use filtering
-    original_prepare = visualizer.prepare_dataframe
-    visualizer.prepare_dataframe = lambda: original_prepare(filter_for_code=filter_for_code, filter_source=filter_source)
+    visualizer.configure_filter(filter_for_code=filter_for_code, filter_source=filter_source)
     
     # Generate summary statistics
     visualizer.generate_summary_stats()
