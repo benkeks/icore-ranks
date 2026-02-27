@@ -36,6 +36,8 @@ class RankingVisualizer:
         self.data = self.load_data()
         self.filter_for_code = None
         self.filter_source = None
+        self.migration_split_for_codes = []
+        self.migration_split_source = None
         self.for_code_names = {
             '4613': 'Theory of Computation'
         }
@@ -44,6 +46,21 @@ class RankingVisualizer:
         """Configure default FoR/source filter for all plots and stats."""
         self.filter_for_code = filter_for_code
         self.filter_source = filter_source
+
+    def configure_migration_split(self, split_for_codes=None, split_source=None):
+        """Configure optional secondary FoR split for migration plot.
+
+        Args:
+            split_for_codes: list of additional FoR codes (match-any). Empty/None disables split.
+            split_source: edition/source in which split_for_codes membership is checked.
+        """
+        if split_for_codes is None:
+            self.migration_split_for_codes = []
+        elif isinstance(split_for_codes, str):
+            self.migration_split_for_codes = [split_for_codes]
+        else:
+            self.migration_split_for_codes = [str(code) for code in split_for_codes if str(code)]
+        self.migration_split_source = split_source
 
     def _format_for_label(self):
         """Format FoR label with code and optional known name."""
@@ -54,6 +71,20 @@ class RankingVisualizer:
         if area_name:
             return f"Field of Research: {self.filter_for_code} - {area_name}"
         return f"Field of Research: {self.filter_for_code}"
+
+    def _format_migration_split_label(self, split_codes=None):
+        """Format optional split label for migration plot title."""
+        active_codes = split_codes if split_codes is not None else self.migration_split_for_codes
+        if not active_codes:
+            return None
+        codes_text = ", ".join(active_codes)
+        return f"Split by additional FoR codes [{codes_text}] (has any vs none)"
+
+    def _lighten_color(self, color, factor=0.45):
+        """Lighten an RGB/hex color by blending towards white."""
+        rgb = np.array(matplotlib.colors.to_rgb(color))
+        white = np.array([1.0, 1.0, 1.0])
+        return tuple(rgb + (white - rgb) * factor)
         
     def load_data(self):
         """Load ranking data from JSON file"""
@@ -413,7 +444,7 @@ class RankingVisualizer:
         
         plt.close()
     
-    def plot_rank_migrations(self, output_file="rank_migrations.png"):
+    def plot_rank_migrations(self, output_file="rank_migrations.png", split_for_codes=None, split_source=None):
         """Plot conference migrations between ranks across editions as a Sankey-like diagram"""
         df = self.prepare_dataframe()
         
@@ -421,17 +452,80 @@ class RankingVisualizer:
             print("No data to plot!")
             return
         
+        # One conference can be split into secondary subgroup by additional FoR codes, e.g. ['4612', '4606'].
+        if split_for_codes is None:
+            active_split_codes = list(self.migration_split_for_codes)
+        elif isinstance(split_for_codes, str):
+            active_split_codes = [split_for_codes]
+        else:
+            active_split_codes = [str(code) for code in split_for_codes if str(code)]
+
+        active_split_source = split_source if split_source is not None else self.migration_split_source
+        if active_split_codes and not active_split_source:
+            active_split_source = self.filter_source
+
+        split_conferences = set()
+        split_code_set = set(active_split_codes)
+        if split_code_set and active_split_source:
+            for entry in self.data:
+                entry_codes = set(entry.get('for_codes', []))
+                if entry.get('source') == active_split_source and entry_codes.intersection(split_code_set):
+                    split_conferences.add(entry.get('acronym'))
+
+        def conference_bucket(acronym):
+            if not active_split_codes:
+                return None
+            return 'with' if acronym in split_conferences else 'without'
+
+        def category_key(rank, acronym):
+            bucket = conference_bucket(acronym)
+            if bucket is None:
+                return rank
+            return (rank, bucket)
+
+        def category_base_rank(category):
+            if isinstance(category, tuple):
+                return category[0]
+            return category
+
+        def category_label(category):
+            if isinstance(category, tuple):
+                rank, bucket = category
+                if bucket == 'with':
+                    codes_text = "+" + "/".join(active_split_codes)
+                    return f"{rank}\n({codes_text})"
+                return rank
+            return category
+
         # Get unique sources in chronological order
         unique_sources = sorted(df['source'].unique())
         if len(unique_sources) < 2:
             print("Need at least 2 editions for migration visualization")
             return
+
+        # Keep one row per conference/source to avoid accidental duplicate transitions
+        df = df.drop_duplicates(subset=['acronym', 'source'], keep='first')
         
         # Create figure
         fig, ax = plt.subplots(figsize=(6 + 4 * len(unique_sources), 12))
         
         display_rank_order = [r for r in self.RANK_ORDER if r != 'Australasian']
-        rank_colors = {r: self.RANK_COLORS[r] for r in display_rank_order}
+        if active_split_codes:
+            display_categories = []
+            for rank in display_rank_order:
+                display_categories.append((rank, 'with'))
+                display_categories.append((rank, 'without'))
+        else:
+            display_categories = display_rank_order.copy()
+
+        rank_colors = {}
+        for category in display_categories:
+            base_rank = category_base_rank(category)
+            base_color = self.RANK_COLORS.get(base_rank, '#7f7f7f')
+            if isinstance(category, tuple) and category[1] == 'without':
+                rank_colors[category] = self._lighten_color(base_color, factor=0.45)
+            else:
+                rank_colors[category] = base_color
         
         # Prepare data for all sources
         y_positions = {}
@@ -439,12 +533,16 @@ class RankingVisualizer:
         
         for source_idx, source in enumerate(unique_sources):
             df_source = df[df['source'] == source]
-            rank_counts = df_source['rank_group'].value_counts()
+            rank_counts = defaultdict(int)
+            for _, row in df_source.iterrows():
+                rank = row['rank_group']
+                category = category_key(rank, row['acronym'])
+                rank_counts[category] += 1
             source_rank_counts[source] = rank_counts
             
             # Get relevant ranks for this source
-            relevant_ranks = [r for r in display_rank_order if r in rank_counts.index]
-            relevant_ranks = sorted(relevant_ranks, key=lambda r: display_rank_order.index(r))
+            relevant_ranks = [r for r in display_categories if rank_counts.get(r, 0) > 0]
+            relevant_ranks = sorted(relevant_ranks, key=lambda r: display_categories.index(r))
             
             # Assign y-positions
             current_y = 0
@@ -472,7 +570,7 @@ class RankingVisualizer:
                 if len(conf_data_from) > 0 and len(conf_data_to) > 0:
                     from_rank = conf_data_from.iloc[0]['rank_group']
                     to_rank = conf_data_to.iloc[0]['rank_group']
-                    transitions[(from_rank, to_rank)] += 1
+                    transitions[(category_key(from_rank, conf), category_key(to_rank, conf))] += 1
 
             pair_transition_counts[(source, next_source)] = transitions
             if transitions:
@@ -483,7 +581,7 @@ class RankingVisualizer:
             x_pos = source_idx * 4
             
             # Draw rank boxes for this source
-            for rank in display_rank_order:
+            for rank in display_categories:
                 if rank in y_positions[source]:
                     y_min, y_max = y_positions[source][rank]
                     height = y_max - y_min
@@ -493,7 +591,7 @@ class RankingVisualizer:
                                                   facecolor=color, alpha=0.6, edgecolor='black', linewidth=1.5)
                         ax.add_patch(rect)
                         count = source_rank_counts[source].get(rank, 0)
-                        ax.text(x_pos, (y_min + y_max) / 2, f"{rank}\n({count})", 
+                        ax.text(x_pos, (y_min + y_max) / 2, f"{category_label(rank)}\n({count})", 
                                ha='center', va='center', fontsize=10, fontweight='bold')
             
             # Draw flows to next source
@@ -605,8 +703,12 @@ class RankingVisualizer:
             x_pos = source_idx * 4
             ax.text(x_pos, all_y_max + 1.5, source, fontsize=13, fontweight='bold', ha='center')
         
-        ax.set_title(f'Conference Migrations Between Ranks Across Editions\n{self._format_for_label()}',
-                     fontsize=16, fontweight='bold', pad=20)
+        split_label = self._format_migration_split_label(active_split_codes) if active_split_codes else None
+        if split_label:
+            title_text = f'Conference Migrations Between Ranks Across Editions\n{self._format_for_label()}\n{split_label}'
+        else:
+            title_text = f'Conference Migrations Between Ranks Across Editions\n{self._format_for_label()}'
+        ax.set_title(title_text, fontsize=16, fontweight='bold', pad=20)
         
         plt.tight_layout()
         
@@ -658,7 +760,9 @@ def main():
     
     filter_for_code = "4613"  # Theory of Computation
     filter_source = "ICORE2026"
+    split_for_codes = ["4612", "4606"]
     visualizer.configure_filter(filter_for_code=filter_for_code, filter_source=filter_source)
+    visualizer.configure_migration_split(split_for_codes=split_for_codes, split_source=filter_source)
     
     # Generate summary statistics
     visualizer.generate_summary_stats()
